@@ -54,7 +54,7 @@ async function loadCard() {
         if (bytes.length > 28 && bytes.length <= 20000000) { payload = bytes; break; }
       } catch (error) { if (signal.aborted) return; allMissing = false; }
     }
-    if (!payload) throw new Error(allMissing ? 'This card is not online yet. Please try again shortly or contact the issuing center.' : 'Unable to load this card. Check your internet connection and try again.');
+    if (!payload) throw new Error(allMissing ? 'This card is not available. It may have expired or been deleted. Please contact the issuing center.' : 'Unable to load this card. Check your internet connection and try again.');
     const keyBytes = Uint8Array.from(atob(secret.replace(/-/g, '+').replace(/_/g, '/') + '=='), c => c.charCodeAt(0));
     let plain;
     try {
