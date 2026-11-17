@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow,noarchive">
+<meta name="application-name" content="jewelry-card-viewer-v1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob:; connect-src 'self' https://raw.githubusercontent.com; base-uri 'none'; form-action 'none'; object-src 'none'">
+<title>Jewelry certificate</title>
+<style>
+:root{color-scheme:light;font-family:system-ui,sans-serif;color:#1b2838;background:#f0f2f5}
+body{margin:0;padding:24px 14px}main{max-width:760px;margin:auto}header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:20px}h1{font-size:20px;margin:0}small{display:block;color:#596575;margin-top:6px}.panel{background:white;border:1px solid #dce1e7;border-radius:12px;padding:20px;margin-bottom:16px}p{line-height:1.55;margin:0}a,button{display:inline-block;padding:11px 16px;background:#1b2838;color:white;border:0;border-radius:7px;font:inherit;text-decoration:none;cursor:pointer}button{margin-top:12px}img{display:block;width:100%;height:auto;background:white;border-radius:5px}footer{font-size:12px;color:#596575;margin-top:16px;line-height:1.5}[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<header><div><h1>Jewelry certificate</h1><small>Complete card · Front and back</small></div><a id="download" hidden>Download JPG</a></header>
+<section id="notice" class="panel" aria-live="polite"><p id="status">Scan the QR on your card to view its picture.</p><button id="retry" type="button" hidden>Try again</button></section>
+<img id="card" alt="Complete jewelry certificate, front above back" hidden>
+<footer>Keep your card link private. Anyone with the QR or link can view and download this certificate. The picture is decrypted on your device.</footer>
+</main>
+<script>
+'use strict';
+const owner = 'srsjony', repo = 'jewelry-cards';
+const picture = document.getElementById('card'), download = document.getElementById('download');
+const status = document.getElementById('status'), notice = document.getElementById('notice'), retry = document.getElementById('retry');
+let imageUrl, controller;
+async function loadCard() {
+  if (controller) controller.abort();
+  controller = new AbortController();
+  const signal = controller.signal;
+  picture.hidden = download.hidden = retry.hidden = true;
+  picture.removeAttribute('src'); download.removeAttribute('href');
+  if (imageUrl) { URL.revokeObjectURL(imageUrl); imageUrl = null; }
+  notice.hidden = false;
+  const match = /^#([A-Za-z0-9_-]{1,100}-[0-9a-f]{6})\.([A-Za-z0-9_-]{22})$/.exec(location.hash);
+  if (!match) { status.textContent = 'Scan the QR on your card, or open the complete card link. This link is missing its card code or key.'; return; }
+  if (!globalThis.crypto?.subtle) { status.textContent = 'Please open this link over HTTPS in an up-to-date browser.'; return; }
+  status.textContent = 'Loading your complete card…';
+  const [, id, secret] = match;
+  const raw = `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/docs/cards/${id}.bin`;
+  const pages = new URL(`cards/${id}.bin`, location.href.split('#')[0]);
+  let payload, allMissing = true;
+  try {
+    for (const address of [raw, pages]) {
+      try {
+        const url = new URL(address); url.searchParams.set('v', Date.now().toString());
+        const response = await fetch(url, { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) });
+        if (!response.ok) { if (response.status !== 404) allMissing = false; continue; }
+        allMissing = false;
+        if (Number(response.headers.get('Content-Length')) > 20000000) continue;
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (bytes.length > 28 && bytes.length <= 20000000) { payload = bytes; break; }
+      } catch (error) { if (signal.aborted) return; allMissing = false; }
+    }
+    if (!payload) throw new Error(allMissing ? 'This card is not online yet. Please try again shortly or contact the issuing center.' : 'Unable to load this card. Check your internet connection and try again.');
+    const keyBytes = Uint8Array.from(atob(secret.replace(/-/g, '+').replace(/_/g, '/') + '=='), c => c.charCodeAt(0));
+    let plain;
+    try {
+      const key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['decrypt']);
+      plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: payload.slice(0, 12), tagLength: 128 }, key, payload.slice(12));
+    } catch { throw new Error('This link cannot unlock the card. Rescan the original QR or ask the issuing center for the correct link.'); }
+    if (signal.aborted) return;
+    const signature = new Uint8Array(plain);
+    if (signature[0] !== 255 || signature[1] !== 216 || signature[2] !== 255) throw new Error('The card picture is damaged. Please contact the issuing center.');
+    imageUrl = URL.createObjectURL(new Blob([plain], { type: 'image/jpeg' }));
+    picture.src = download.href = imageUrl;
+    download.download = `${id}_card.jpg`;
+    picture.hidden = download.hidden = false;
+    notice.hidden = true;
+  } catch (error) {
+    if (signal.aborted) return;
+    status.textContent = error.message;
+    retry.hidden = false;
+  }
+}
+retry.addEventListener('click', loadCard);
+window.addEventListener('hashchange', loadCard);
+loadCard();
+</script>
+</body>
+</html>
